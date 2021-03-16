@@ -32,7 +32,7 @@ Parameters:
   AppUrl:
     Description: Michel S3 URL app
     Type: String
-    Default: https://s3.amazonaws.com/practica-2.cloud.michel/app.jar
+    Default: https://cf-templates-d6ff7se4751r-us-east-1.s3.amazonaws.com/ja.devicentel-0.0.1-SNAPSHOT.jar
 
 Resources:
 
