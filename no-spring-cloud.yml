@@ -36,6 +36,13 @@ Parameters:
 
 Resources:
 
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref S3BucketName
+      AccessControl: PublicRead
+
   S3FullAccessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -58,8 +65,11 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: 's3:*'
-                Resource: 
-                  - arn:aws:s3:::joaquin-antonio-de-vicente-lopez
+                Resource:
+                  !Join
+                  - ''
+                  - - !GetAtt S3Bucket.Arn
+                    - '/*'
 
   S3InstanceProfile:
     Type: AWS::IAM::InstanceProfile
