@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Cloud Formation EC2 Stack
+
+Parameters:
+
+  AMIId:
+    Description: The ami to use (Ubuntu 18.04 us-east-1)
+    Type: AWS::EC2::Image::Id
+    Default: ami-013f17f36f8b1fefb
+
+  DBInstanceId:
+    Description: Db Instance Identifier
+    Type: String
+    Default: events
+
+  DBPassword:
+    Description: Database password
+    Type: String
+    NoEcho: true
+    MinLength: 8
+
+  DBInstanceClass:
+    Description: Instance type for db
+    Type: String
+    Default: db.t2.micro
+
+  S3BucketName:
+    Description: Name of the bucket
+    Type: String
+    Default: joaquin-antonio-de-vicente-lopez
+
+  AppUrl:
+    Description: Michel S3 URL app
+    Type: String
+    Default: https://s3.amazonaws.com/practica-2.cloud.michel/app.jar
+
+Resources:
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref S3BucketName
+      AccessControl: PublicRead
+
+  S3FullAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonRDSFullAccess
+      Description: Role with full access to S3 and RDS
+      Policies:
+        - PolicyName: RDSS3FullAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 's3:*'
+                Resource:
+                  !Join
+                  - ''
+                  - - !GetAtt S3Bucket.Arn
+                    - '/*'
+
+  S3InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - Ref: S3FullAccessRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: events-8080-8443
+      GroupDescription: "Security group for app with ingress ports 8080, 8443 and 443"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '8080'
+          ToPort: '8080'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '8443'
+          ToPort: '8443'
+          CidrIp: 0.0.0.0/0
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for MySQL RDS"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '3306'
+          ToPort: '3306'
+          SourceSecurityGroupName: !Ref EC2SecurityGroup
+
+  RDSDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 10
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      DBInstanceIdentifier: !Ref DBInstanceId
+      DBName: events
+      Engine: mysql
+      EngineVersion: 8.0
+      MasterUsername: events
+      MasterUserPassword: !Ref DBPassword
+      MultiAZ: false
+      PubliclyAccessible: true
+      StorageEncrypted: false
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: mca-cf-sample-5-rds  
+
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: RDSDBInstance
+    Properties:
+      ImageId: !Ref AMIId
+      InstanceType: t2.micro
+      IamInstanceProfile: !Ref S3InstanceProfile
+      SecurityGroupIds:
+      - !Ref EC2SecurityGroup
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+          - |
+            #!/bin/bash -xe
+            sudo apt update && sudo apt install -y openjdk-11-jre-headless
+            export BUCKET_NAME=${S3BucketName}
+            export RDS_ENDPOINT=${RDSDBInstanceAddress}
+            export REGION=us-east-1
+            export RDS_DATABASE=events
+            export RDS_PASS=${DBPassword}
+            export RDS_USER=events
+            wget -O app.jar ${AppUrl}
+            java -jar -Dspring.profiles.active=production app.jar
+          - S3BucketName: !Ref S3BucketName
+            RDSDBInstanceAddress: !GetAtt RDSDBInstance.Endpoint.Address
+            DBPassword: !Ref DBPassword
+            AppUrl: !Ref AppUrl
+
+Outputs:
+  PublicDns:
+    Value: !GetAtt MyEC2Instance.PublicDnsName
+    Description: "EC2 Public DNS for users access"
+  WebSiteURL:
+    Value:
+      !Join
+    - ''
+    - - "https://"
+      - !GetAtt MyEC2Instance.PublicDnsName
+      - ":8443"
+      - "/api/events/"
+    Description: "EC2 GET Events endpoint"
